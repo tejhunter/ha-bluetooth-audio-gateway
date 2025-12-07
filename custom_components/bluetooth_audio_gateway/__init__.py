@@ -12,17 +12,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Bluetooth Audio Gateway from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # CORRECTION : Appeler directement async_forward_entry_setups avec await
+    # Forward the setup to the media_player platform
     await hass.config_entries.async_forward_entry_setups(entry, ["media_player"])
     
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    # Mise à jour pour correspondre à la nouvelle API (avec 's')
-    unload_ok = await hass.config_entries.async_unload_entry_setups(entry, ["media_player"])
+    # CORRECTION : Utiliser la méthode correcte async_unload_platforms
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["media_player"])
     
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)  # Utilisation de .pop avec valeur par défaut pour sécurité
+        hass.data[DOMAIN].pop(entry.entry_id, None)
     
     return unload_ok
