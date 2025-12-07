@@ -3,6 +3,8 @@ import logging
 import aiohttp
 import async_timeout
 from datetime import timedelta
+from aiohttp import FormData
+import asyncio
 
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
@@ -97,7 +99,7 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         self._attr_name = "Bluetooth Audio Gateway"
         self._attr_unique_id = f"{DOMAIN}_{host}_{port}"
         
-        # 1. CORRECTION : Forcer l'entité à être marquée comme disponible
+        # Force the entity to be marked as available
         self._attr_available = True
         
         # Supported features
@@ -111,7 +113,6 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
     @property
     def state(self):
         """Return the state of the player."""
-        # Lire depuis les données centralisées du coordinateur
         if self.coordinator.data and self.coordinator.data.get("connected_device"):
             _LOGGER.debug("État déterminé: ON (appareil connecté trouvé)")
             return MediaPlayerState.ON
@@ -140,7 +141,7 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         if not self.coordinator.data:
             return
             
-        # Trouver l'appareil par son nom dans all_devices
+        # Find device by name in all_devices
         device = None
         for dev in self.coordinator.data.get("all_devices", []):
             if dev["name"] == source:
@@ -164,19 +165,56 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
             except Exception as err:
                 _LOGGER.error(f"Error connecting to device: {err}")
             
-            # Rafraîchir les données du coordinateur
+            # Refresh coordinator data
             await self.coordinator.async_request_refresh()
     
+    # --- CORRECTED async_play_media METHOD (Properly indented) ---
     async def async_play_media(self, media_type, media_id, **kwargs):
         """Play media from a URL or TTS."""
-        # For now, we'll just implement TTS via a simple method
-        # This will be expanded later
-        _LOGGER.info(f"Would play media: {media_id} of type {media_type}")
+        _LOGGER.info(f"Playing media: {media_id} of type {media_type}")
+
+        # For TTS: media_id is a URL like "http://homeassistant.local:8123/api/tts_proxy/..."
+        # For external URLs: media_id is the direct URL to an audio file/stream.
         
-        # Here you would:
-        # 1. Download the audio file (if URL)
-        # 2. Send it to your add-on to play on Bluetooth speaker
-        # This requires additional API endpoints in your add-on
+        try:
+            async with aiohttp.ClientSession() as session:
+                # 1. FIRST, FETCH THE AUDIO DATA
+                async with session.get(media_id) as audio_resp:
+                    if audio_resp.status != 200:
+                        _LOGGER.error(f"Failed to fetch audio from {media_id}. Status: {audio_resp.status}")
+                        return
+                    
+                    # Read the audio data into memory
+                    audio_data = await audio_resp.read()
+                    _LOGGER.debug(f"Fetched {len(audio_data)} bytes of audio data.")
+                
+                # 2. THEN, STREAM IT TO THE ADD-ON
+                # Create a multipart form with the audio file
+                form_data = FormData()
+                # The add-on expects a file upload with the field name 'file'
+                form_data.add_field('file', 
+                                    audio_data, 
+                                    filename='audio.mp3',  # Name can be generic
+                                    content_type='audio/mpeg')  # Adjust if you know the exact type
+                
+                stream_url = f"http://{self._host}:{self._port}/api/stream"
+                async with session.post(stream_url, data=form_data) as stream_resp:
+                    if stream_resp.status == 200:
+                        response_data = await stream_resp.json()
+                        if response_data.get("success"):
+                            _LOGGER.info("Successfully streamed audio to the add-on.")
+                        else:
+                            _LOGGER.error(f"Add-on stream error: {response_data.get('error')}")
+                    else:
+                        _LOGGER.error(f"Failed to stream to add-on. HTTP Status: {stream_resp.status}")
+                        
+        except asyncio.TimeoutError:
+            _LOGGER.error("Timeout while streaming audio to the add-on.")
+        except aiohttp.ClientError as err:
+            _LOGGER.error(f"Network error during audio playback: {err}")
+        except Exception as err:
+            _LOGGER.error(f"Unexpected error in async_play_media: {err}")
+    # --- END of async_play_media ---
     
     async def async_turn_on(self):
         """Turn the media player on."""
@@ -186,7 +224,7 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
     
     async def async_turn_off(self):
         """Turn the media player off."""
-        # L'appareil connecté est maintenant dans self.coordinator.data
+        # Connected device is now in self.coordinator.data
         connected_device = self.coordinator.data.get("connected_device") if self.coordinator.data else None
         
         if connected_device:
@@ -206,5 +244,5 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
             except Exception as err:
                 _LOGGER.error(f"Error disconnecting device: {err}")
             
-            # Rafraîchir les données
+            # Refresh data
             await self.coordinator.async_request_refresh()
