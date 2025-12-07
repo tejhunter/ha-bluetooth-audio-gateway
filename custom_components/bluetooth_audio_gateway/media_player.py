@@ -108,9 +108,8 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
     def state(self):
         """Return the state of the player."""
         # Lire depuis les données centralisées du coordinateur
-        if self.coordinator.data and self.coordinator.data.get("connected_device"):
-            return MediaPlayerState.ON
-        return MediaPlayerState.OFF
+        # TEST TEMPORAIRE : Forcer l'état ON pour isoler le problème
+        return MediaPlayerState.ON
     
     @property
     def source_list(self):
