@@ -69,6 +69,8 @@ class BluetoothAudioGatewayCoordinator(DataUpdateCoordinator):
                                         connected_device = device
                                         break
                                 
+                                _LOGGER.debug("Données reçues de l'API : %s", data)
+                                _LOGGER.debug("Appareil connecté trouvé : %s", connected_device)
                                 # Retourne un dictionnaire avec TOUTES les données nécessaires
                                 return {
                                     "all_devices": all_devices,
@@ -78,6 +80,8 @@ class BluetoothAudioGatewayCoordinator(DataUpdateCoordinator):
                                 raise UpdateFailed(f"API error: {data.get('error')}")
                         else:
                             raise UpdateFailed(f"HTTP error: {resp.status}")
+                        
+
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}")
         
@@ -93,6 +97,9 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         self._attr_name = "Bluetooth Audio Gateway"
         self._attr_unique_id = f"{DOMAIN}_{host}_{port}"
         
+        # 1. CORRECTION : Forcer l'entité à être marquée comme disponible
+        self._attr_available = True
+        
         # Supported features
         self._attr_supported_features = (
             MediaPlayerEntityFeature.PLAY_MEDIA |
@@ -100,16 +107,17 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
             MediaPlayerEntityFeature.TURN_ON |
             MediaPlayerEntityFeature.TURN_OFF
         )
-        # SUPPRIMEZ les lignes suivantes qui définissaient un état initial statique:
-        # self._attr_state = MediaPlayerState.OFF
-        # self._attr_source_list = []
     
     @property
     def state(self):
         """Return the state of the player."""
         # Lire depuis les données centralisées du coordinateur
-        # TEST TEMPORAIRE : Forcer l'état ON pour isoler le problème
-        return MediaPlayerState.ON
+        if self.coordinator.data and self.coordinator.data.get("connected_device"):
+            _LOGGER.debug("État déterminé: ON (appareil connecté trouvé)")
+            return MediaPlayerState.ON
+        
+        _LOGGER.debug("État déterminé: OFF (pas d'appareil connecté)")
+        return MediaPlayerState.OFF
     
     @property
     def source_list(self):
@@ -123,6 +131,8 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         """Return the current source (connected device)."""
         if self.coordinator.data and self.coordinator.data.get("connected_device"):
             return self.coordinator.data["connected_device"]["name"]
+        
+        _LOGGER.debug("Données du coordinateur pour l'état : %s", self.coordinator.data)
         return None
     
     async def async_select_source(self, source):
