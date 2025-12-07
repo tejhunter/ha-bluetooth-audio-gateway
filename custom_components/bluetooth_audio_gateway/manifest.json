@@ -1,0 +1,11 @@
+{
+  "domain": "bluetooth_audio_gateway",
+  "name": "Bluetooth Audio Gateway",
+  "version": "1.0.0",
+  "documentation": "https://github.com/tejhunter/ha-bluetooth-audio-gateway",
+  "requirements": ["aiohttp"],
+  "dependencies": [],
+  "codeowners": ["@tejhunter"],
+  "config_flow": true,
+  "iot_class": "local_polling"
+}
