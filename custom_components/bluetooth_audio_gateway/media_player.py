@@ -51,8 +51,6 @@ class BluetoothAudioGatewayCoordinator(DataUpdateCoordinator):
         )
         self.host = host
         self.port = port
-        self.devices = []
-        self.connected_device = None
     
     async def _async_update_data(self):
         """Fetch data from the add-on."""
@@ -63,20 +61,26 @@ class BluetoothAudioGatewayCoordinator(DataUpdateCoordinator):
                         if resp.status == 200:
                             data = await resp.json()
                             if data.get("success"):
-                                self.devices = data.get("devices", [])
-                                # Find connected device
-                                for device in self.devices:
+                                all_devices = data.get("devices", [])
+                                # Cherche l'appareil connecté
+                                connected_device = None
+                                for device in all_devices:
                                     if device.get("connected"):
-                                        self.connected_device = device
-                                        return self.connected_device
-                                self.connected_device = None
-                                return None
+                                        connected_device = device
+                                        break
+                                
+                                # Retourne un dictionnaire avec TOUTES les données nécessaires
+                                return {
+                                    "all_devices": all_devices,
+                                    "connected_device": connected_device
+                                }
                             else:
                                 raise UpdateFailed(f"API error: {data.get('error')}")
                         else:
                             raise UpdateFailed(f"HTTP error: {resp.status}")
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}")
+        
 
 class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
     """Representation of a Bluetooth Audio Gateway media player."""
@@ -96,35 +100,40 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
             MediaPlayerEntityFeature.TURN_ON |
             MediaPlayerEntityFeature.TURN_OFF
         )
-        
-        # Initial state
-        self._attr_state = MediaPlayerState.OFF
-        self._attr_source_list = []
+        # SUPPRIMEZ les lignes suivantes qui définissaient un état initial statique:
+        # self._attr_state = MediaPlayerState.OFF
+        # self._attr_source_list = []
     
     @property
     def state(self):
         """Return the state of the player."""
-        if self.coordinator.connected_device:
+        # Lire depuis les données centralisées du coordinateur
+        if self.coordinator.data and self.coordinator.data.get("connected_device"):
             return MediaPlayerState.ON
         return MediaPlayerState.OFF
     
     @property
     def source_list(self):
         """Return the list of available sources (Bluetooth devices)."""
-        return [device["name"] for device in self.coordinator.devices]
+        if self.coordinator.data:
+            return [device["name"] for device in self.coordinator.data.get("all_devices", [])]
+        return []
     
     @property
     def source(self):
         """Return the current source (connected device)."""
-        if self.coordinator.connected_device:
-            return self.coordinator.connected_device["name"]
+        if self.coordinator.data and self.coordinator.data.get("connected_device"):
+            return self.coordinator.data["connected_device"]["name"]
         return None
     
     async def async_select_source(self, source):
         """Select a Bluetooth device to connect to."""
-        # Find device by name
+        if not self.coordinator.data:
+            return
+            
+        # Trouver l'appareil par son nom dans all_devices
         device = None
-        for dev in self.coordinator.devices:
+        for dev in self.coordinator.data.get("all_devices", []):
             if dev["name"] == source:
                 device = dev
                 break
@@ -146,7 +155,7 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
             except Exception as err:
                 _LOGGER.error(f"Error connecting to device: {err}")
             
-            # Refresh data
+            # Rafraîchir les données du coordinateur
             await self.coordinator.async_request_refresh()
     
     async def async_play_media(self, media_type, media_id, **kwargs):
@@ -163,19 +172,21 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
     async def async_turn_on(self):
         """Turn the media player on."""
         # Connect to the first available device
-        if self.coordinator.devices:
-            await self.async_select_source(self.coordinator.devices[0]["name"])
+        if self.coordinator.data and self.coordinator.data.get("all_devices"):
+            await self.async_select_source(self.coordinator.data["all_devices"][0]["name"])
     
     async def async_turn_off(self):
         """Turn the media player off."""
-        # Disconnect from current device
-        if self.coordinator.connected_device:
+        # L'appareil connecté est maintenant dans self.coordinator.data
+        connected_device = self.coordinator.data.get("connected_device") if self.coordinator.data else None
+        
+        if connected_device:
             try:
                 async with aiohttp.ClientSession() as session:
                     async with async_timeout.timeout(10):
                         async with session.post(
                             f"http://{self._host}:{self._port}/api/disconnect",
-                            json={"address": self.coordinator.connected_device["address"]}
+                            json={"address": connected_device["address"]}
                         ) as resp:
                             if resp.status == 200:
                                 data = await resp.json()
@@ -186,5 +197,5 @@ class BluetoothAudioGatewayMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
             except Exception as err:
                 _LOGGER.error(f"Error disconnecting device: {err}")
             
-            # Refresh data
+            # Rafraîchir les données
             await self.coordinator.async_request_refresh()
